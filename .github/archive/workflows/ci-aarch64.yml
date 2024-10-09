@@ -1,0 +1,99 @@
+# *******************************************************************************
+# Copyright 2024 Arm Limited and affiliates.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# *******************************************************************************
+
+name: "CI AArch64"
+
+#* To avoid duplicate jobs running when both push and PR is satisfied, we use this:
+#* https://github.com/orgs/community/discussions/26940#discussioncomment-5686753
+on:
+  push:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+#* Stop stale workflows when pull requests are updated: https://stackoverflow.com/a/70972844
+#* Does not apply to the main branch.
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+# Declare default permissions as read only.
+permissions: read-all
+
+jobs:
+  macos:
+    name: macOS
+    runs-on: macos-14
+    strategy:
+      matrix:
+        toolset: [clang, gcc]
+        config: [Debug, Release]
+
+    steps:
+      - name: Checkout oneDNN
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          path: oneDNN
+
+      - name: Install Scons
+        uses: threeal/pipx-install-action@b0bf0add7d5aefda03a3d4e47d651df807889e10 # v1.0.0
+        with:
+          packages: scons
+
+      - name: Clone ACL
+        run: ${{ github.workspace }}/oneDNN/.github/automation/build_acl.sh
+        env:
+          ACL_ACTION: clone
+          ACL_ROOT_DIR: ${{ github.workspace }}/ComputeLibrary
+          BUILD_TOOLSET: ${{ matrix.toolset }}
+          ACL_CONFIG: ${{ matrix.config }}
+          GCC_VERSION: 14
+
+      - name: Get ACL commit hash for cache key
+        id: get_acl_commit_hash
+        run: (cd ${{ github.workspace }}/ComputeLibrary && echo "ACLCommitHash=$(git rev-parse --short HEAD)") >> $GITHUB_OUTPUT
+
+      - name: Get system name
+        id: get_system_name
+        run: (echo "SystemName=$(uname)") >> $GITHUB_OUTPUT
+
+      - name: Restore cached ACL_build
+        id: cache-acl_build-restore
+        uses: actions/cache/restore@v4
+        with:
+          key: ${{ steps.get_system_name.outputs.SystemName }}-acl_build-${{ matrix.toolset }}-${{ matrix.config }}-${{ steps.get_acl_commit_hash.outputs.ACLCommitHash }}
+          path: |
+            ${{ github.workspace }}/ComputeLibrary/build
+
+      - name: Build ACL
+        if:  ${{ steps.cache-acl_build-restore.outputs.cache-hit != 'true' }}
+        run: ${{ github.workspace }}/oneDNN/.github/automation/build_acl.sh
+        env:
+          ACL_ACTION: build
+          ACL_ROOT_DIR: ${{ github.workspace }}/ComputeLibrary
+          BUILD_TOOLSET: ${{ matrix.toolset }}
+          ACL_CONFIG: ${{ matrix.config }}
+          GCC_VERSION: 14
+
+      - name: Save ACL_build
+        if:  ${{ steps.cache-acl_build-restore.outputs.cache-hit != 'true' }}
+        id: cache-acl_build-save
+        uses: actions/cache/save@v4
+        with:
+          key: ${{ steps.cache-acl_build-restore.outputs.cache-primary-key }}
+          path: |
+            ${{ github.workspace }}/ComputeLibrary/build
+

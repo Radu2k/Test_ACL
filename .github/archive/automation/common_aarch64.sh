@@ -17,35 +17,31 @@
 # limitations under the License.
 # *******************************************************************************
 
-# Build oneDNN for aarch64.
+# Common variables for aarch64 ci. Exports: 
+# CC, CXX, OS, MP
 
 set -o errexit -o pipefail -o noclobber
 
-SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+export OS=$(uname)
 
-# Defines MP, CC, CXX and OS.
-source ${SCRIPT_DIR}/common_aarch64.sh
-
-export ACL_ROOT_DIR=${ACL_ROOT_DIR:-"${PWD}/ComputeLibrary"}
-
-CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE:-"Release"}
-ONEDNN_TEST_SET=SMOKE
-
-# ACL is not built with OMP on macOS.
+# Num threads on system.
 if [[ "$OS" == "Darwin" ]]; then
-    ONEDNN_THREADING=SEQ
+    export MP="-j$(sysctl -n hw.ncpu)"
+elif [[ "$OS" == "Linux" ]]; then
+    export MP="-j$(nproc)"
 fi
 
-set -x
-cmake \
-    -Bbuild -S. \
-    -DDNNL_AARCH64_USE_ACL=ON \
-    -DONEDNN_BUILD_GRAPH=0 \
-    -DDNNL_CPU_RUNTIME=$ONEDNN_THREADING \
-    -DONEDNN_WERROR=ON \
-    -DDNNL_BUILD_FOR_CI=ON \
-    -DONEDNN_TEST_SET=$ONEDNN_TEST_SET \
-    -DCMAKE_BUILD_TYPE=$CMAKE_BUILD_TYPE
+if [[ "$BUILD_TOOLSET" == "gcc" ]]; then
+    export CC=gcc-${GCC_VERSION}
+    export CXX=g++-${GCC_VERSION}
+elif [[ "$BUILD_TOOLSET" == "clang" ]]; then
+    export CC=clang
+    export CXX=clang++
+fi
 
-cmake --build build $MP
-set +x
+# Print every exported variable.
+echo "OS: $OS"
+echo "Toolset: $BUILD_TOOLSET"
+echo "CC: $CC"
+echo "CXX: $CXX"
+echo "MP: $MP"
